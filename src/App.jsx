@@ -30,7 +30,7 @@ const levelNames = {
 };
 const themeNames = {
   bank: "Банк",
-  police: "Полиция",
+  police: "Милиция",
   hospital: "Больница",
   delivery: "Доставка",
   lottery: "Лотерея",

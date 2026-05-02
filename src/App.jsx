@@ -2191,6 +2191,7 @@ setChat(prev => [
       setChatReview(false); // 🔥 ОБЯЗАТЕЛЬНО
       setError("Вы доверились мошеннику или передали данные.");
       setResult("lose");
+      setScore(prev => (prev - 3 < 0 ? 0 : prev - 3));
       return;
     }
 
@@ -2205,7 +2206,6 @@ if (next >= data.length) {
 
   // 🔥 добавляем очки
   setScore(prev => prev + (levelPoints[level] || 0));
-
   return;
 }
     setStep(next);
@@ -2306,6 +2306,7 @@ return (
         <li>Эксперт уровень - 20 баллов.</li>
         <li>Хардкор уровень - 25 баллов.</li>
       </ul>
+      <p>❗️Но за каждую ошибку у вас будет сниматься с баланса по 3 балла.</p>
 
       <h3>🏅 Звания:</h3>
       <ul>
@@ -2459,7 +2460,7 @@ return (
                 <>
                   <h2>❌ Ошибка</h2>
                   <p>Посмотрите разбор чата, чтобы понять ошибку</p>
-
+                  <div className="points">-3 балла</div>
                   <button onClick={restartLevel}>Попробовать заново</button>
                   <button onClick={goToMenu}>В меню</button>
                   <button onClick={() => {

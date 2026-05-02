@@ -1214,3 +1214,6 @@ html, body {
 .help-btn{
   border-color: #fff;
 }
+.overlayContent.fail .points {
+  color: #dc2626;
+}

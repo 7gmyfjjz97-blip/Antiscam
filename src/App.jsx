@@ -2218,15 +2218,18 @@ const startLevel = async (themeValue, lvl) => {
     );
 
   } catch (err) {
-    console.error("AI ERROR:", err);
+  console.error("AI ERROR:", err);
 
-    setError(
-      "Не удалось подключиться к нейросети. Попробуйте ещё раз."
-    );
+  setError(
+    "Не удалось получить первый ход от нейросети. Попробуйте ещё раз."
+  );
 
-    setOverlayType("fail");
-    setShowOverlay(true);
-  } finally {
+  setAiOptions([]);
+  setChat([]);
+
+  // Техническая ошибка НЕ является проигрышем
+  setShowOverlay(false);
+}finally {
     setAiLoading(false);
   }
 };
@@ -2243,12 +2246,12 @@ const answer = async (opt) => {
   // Добавляем ответ ученика в чат
   const updatedChat = [
     ...chat,
-    {
-      type: "user",
-      text: opt.text,
-      correct: opt.correct,
-      explain: opt.explain
-    }
+{
+  type: "user",
+  text: opt.text,
+  safe: opt.safe,
+  explanation: opt.explanation
+}
   ];
 
   setChat(updatedChat);
@@ -2257,22 +2260,21 @@ const answer = async (opt) => {
   // ❌ ОШИБКА
   // ==========================================
 
-  if (!opt.correct) {
-    setOverlayType("fail");
-    setShowOverlay(true);
-    setChatReview(false);
-    setResult("lose");
+if (!opt.safe) {
+  setOverlayType("fail");
+  setShowOverlay(true);
+  setChatReview(false);
+  setResult("lose");
 
-    setError(
-      opt.explain ||
-      "Вы доверились мошеннику или выполнили опасное действие."
-    );
+  setError(
+    opt.explanation ||
+    "Вы доверились мошеннику или выполнили опасное действие."
+  );
 
-    // Снимаем 3 балла, но не уходим ниже нуля
-    setScore(prev => Math.max(0, prev - 3));
+  setScore(prev => Math.max(0, prev - 3));
 
-    return;
-  }
+  return;
+}
 
   // ==========================================
   // ✅ ПРАВИЛЬНЫЙ ОТВЕТ
@@ -2321,21 +2323,6 @@ const answer = async (opt) => {
       throw new Error(data.error || "Ошибка AI");
     }
 
-    if (data.gameOver) {
-      setOverlayType("fail");
-      setShowOverlay(true);
-      setResult("lose");
-
-      setError(
-        data.explanation ||
-        "Игра завершена."
-      );
-
-      setScore(prev => Math.max(0, prev - 3));
-
-      return;
-    }
-
     // Новое сообщение мошенника
     if (data.scammerMessage) {
       setChat(prev => [
@@ -2359,18 +2346,18 @@ const answer = async (opt) => {
     );
 
   } catch (err) {
-    console.error("AI ERROR:", err);
+  console.error("AI ERROR:", err);
 
-    setError(
-      "Не удалось получить следующий ход от нейросети."
-    );
+  setError(
+    "Не удалось получить следующий ход от нейросети. Попробуйте ещё раз."
+  );
 
-    setOverlayType("fail");
-    setShowOverlay(true);
+  // Техническая ошибка НЕ считается ошибкой ученика
+  setAiOptions([]);
 
-  } finally {
-    setAiLoading(false);
-  }
+} finally {
+  setAiLoading(false);
+}
 };
 return (
   <div className="app">

@@ -2090,7 +2090,7 @@ const chatRef = useRef(null);
 const [showHelp, setShowHelp] = useState(false);
 const [selectedTheme, setSelectedTheme] = useState(null);
 const [selectedLevel, setSelectedLevel] = useState(null);
-  const [showOverlay, setShowOverlay] = useState(false);
+const [showOverlay, setShowOverlay] = useState(false);
   const [overlayType, setOverlayType] = useState(""); 
   const [chatReview, setChatReview] = useState(false);
   const chatEndRef = useRef(null);
@@ -2106,7 +2106,16 @@ const [selectedLevel, setSelectedLevel] = useState(null);
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
 const [shuffledOptions, setShuffledOptions] = useState([]);
+const [aiOptions, setAiOptions] = useState([]);
+const [aiLoading, setAiLoading] = useState(false);
 
+const levelTurns = {
+  easy: 4,
+  medium: 8,
+  hard: 10,
+  expert: 12,
+  hardcore: 15
+};
 useEffect(() => {
   if (chatRef.current) {
     chatRef.current.scrollTop = chatRef.current.scrollHeight;
@@ -2133,13 +2142,11 @@ useEffect(() => {
 useEffect(() => {
   localStorage.setItem("score", score);
 }, [score]);
-  const restartLevel = () => {
-    setStep(0);
-    const first = chatTemplates[theme][level][0];
-    setChat([{ type: "scam", text: first.bot }]);
-    setShowOverlay(false);
-    setChatReview(false);
-  };
+const restartLevel = () => {
+  if (!theme || !level) return;
+
+  startLevel(theme, level);
+};
 
 const goToMenu = () => {
   setScreen("menu");
@@ -2154,17 +2161,74 @@ const goToMenu = () => {
   setChat([]);
 };
 
-const startLevel = (themeValue, lvl) => {
-  if (!themeValue || !chatTemplates?.[themeValue]?.[lvl]) return;
+const startLevel = async (themeValue, lvl) => {
+  if (!themeValue || !lvl) return;
 
   setTheme(themeValue);
   setLevel(lvl);
   setStep(0);
-
-  const first = chatTemplates[themeValue][lvl][0];
-
-  setChat([{ type: "scam", text: first.bot }]);
+  setChat([]);
+  setAiOptions([]);
+  setShowOverlay(false);
+  setChatReview(false);
+  setResult(null);
+  setError("");
   setScreen("game");
+  setAiLoading(true);
+
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        theme: themeValue,
+        level: lvl,
+        history: [],
+        userAnswer: null
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Ошибка AI");
+    }
+
+    if (!data.scammerMessage) {
+      throw new Error("AI не создал сообщение мошенника");
+    }
+
+    setChat([
+      {
+        type: "scam",
+        text: data.scammerMessage
+      }
+    ]);
+
+    setAiOptions(
+      shuffle(
+        (data.options || []).map(option => ({
+          text: option.text,
+          correct: option.safe,
+          explain: option.explanation
+        }))
+      )
+    );
+
+  } catch (err) {
+    console.error("AI ERROR:", err);
+
+    setError(
+      "Не удалось подключиться к нейросети. Попробуйте ещё раз."
+    );
+
+    setOverlayType("fail");
+    setShowOverlay(true);
+  } finally {
+    setAiLoading(false);
+  }
 };
 
   const endLevel = (type) => {
@@ -2173,48 +2237,141 @@ const startLevel = (themeValue, lvl) => {
     setChatReview(false);
   };
 
-  const answer = (opt) => {
-setChat(prev => [
-  ...prev,
-  {
-    type: "user",
-    text: opt.text,
-    correct: opt.correct,   // ← ВОТ ЭТО ГЛАВНОЕ
-    explain: opt.explain
-  }
-]);
+const answer = async (opt) => {
+  if (aiLoading) return;
 
-    // ❌ ошибка → показываем overlay
-    if (!opt.correct) {
+  // Добавляем ответ ученика в чат
+  const updatedChat = [
+    ...chat,
+    {
+      type: "user",
+      text: opt.text,
+      correct: opt.correct,
+      explain: opt.explain
+    }
+  ];
+
+  setChat(updatedChat);
+
+  // ==========================================
+  // ❌ ОШИБКА
+  // ==========================================
+
+  if (!opt.correct) {
+    setOverlayType("fail");
+    setShowOverlay(true);
+    setChatReview(false);
+    setResult("lose");
+
+    setError(
+      opt.explain ||
+      "Вы доверились мошеннику или выполнили опасное действие."
+    );
+
+    // Снимаем 3 балла, но не уходим ниже нуля
+    setScore(prev => Math.max(0, prev - 3));
+
+    return;
+  }
+
+  // ==========================================
+  // ✅ ПРАВИЛЬНЫЙ ОТВЕТ
+  // ==========================================
+
+  const nextStep = step + 1;
+
+  // Если уровень полностью пройден
+  if (nextStep >= levelTurns[level]) {
+    setStep(nextStep);
+    setOverlayType("success");
+    setShowOverlay(true);
+    setResult("win");
+
+    // Начисляем баллы за уровень
+    setScore(prev => prev + (levelPoints[level] || 0));
+
+    return;
+  }
+
+  // ==========================================
+  // 🤖 ПРОДОЛЖАЕМ ДИАЛОГ С AI
+  // ==========================================
+
+  setStep(nextStep);
+  setAiLoading(true);
+  setAiOptions([]);
+
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        theme,
+        level,
+        history: updatedChat,
+        userAnswer: opt.text
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Ошибка AI");
+    }
+
+    if (data.gameOver) {
       setOverlayType("fail");
       setShowOverlay(true);
-      setChatReview(false); // 🔥 ОБЯЗАТЕЛЬНО
-      setError("Вы доверились мошеннику или передали данные.");
       setResult("lose");
-      setScore(prev => (prev - 3 < 0 ? 0 : prev - 3));
+
+      setError(
+        data.explanation ||
+        "Игра завершена."
+      );
+
+      setScore(prev => Math.max(0, prev - 3));
+
       return;
     }
 
-    const next = step + 1;
-    const data = chatTemplates[theme][level];
+    // Новое сообщение мошенника
+    if (data.scammerMessage) {
+      setChat(prev => [
+        ...prev,
+        {
+          type: "scam",
+          text: data.scammerMessage
+        }
+      ]);
+    }
 
-    // ✅ победа
-if (next >= data.length) {
-  setOverlayType("success");
-  setShowOverlay(true);
-  setResult("win");
+    // Новые варианты ответа
+    setAiOptions(
+      shuffle(
+        (data.options || []).map(option => ({
+          text: option.text,
+          correct: option.safe,
+          explain: option.explanation
+        }))
+      )
+    );
 
-  // 🔥 добавляем очки
-  setScore(prev => prev + (levelPoints[level] || 0));
-  return;
-}
-    setStep(next);
+  } catch (err) {
+    console.error("AI ERROR:", err);
 
-    setChat(prev => [
-      ...prev,
-      { type: "scam", text: data[next].bot }
-    ]);
-  };
+    setError(
+      "Не удалось получить следующий ход от нейросети."
+    );
+
+    setOverlayType("fail");
+    setShowOverlay(true);
+
+  } finally {
+    setAiLoading(false);
+  }
+};
 return (
   <div className="app">
     <div className="chatContainer">
@@ -2364,7 +2521,6 @@ return (
 )}
 {screen === "game" && (
   <div className="chatContainer chatPage">
-  <>
     <div className="header">
   <span className="back" onClick={goToMenu}>←</span>
   {levelNames[level]} уровень
@@ -2385,16 +2541,23 @@ return (
       ))}
     </div>
 
-    <div className="options">
-      {shuffledOptions.map((o, i) => (
-        <button key={i} onClick={() => answer(o)}>
-          {o.text}
-        </button>
-      ))}
+<div className="options">
+  {aiLoading ? (
+    <div className="ai-loading">
+      🤖 Мошенник пишет...
     </div>
-  </>
-  </div>
-)}
+  ) : (
+    aiOptions.map((o, i) => (
+      <button
+        key={i}
+        onClick={() => answer(o)}
+        disabled={aiLoading}
+      >
+        {o.text}
+      </button>
+    ))
+  )}
+</div>
       {showOverlay && (
         <div className="overlay">
 
@@ -2473,38 +2636,45 @@ return (
                 </>
               ) : (
                 <>
-                  <>
-  <div className="confetti">
-    {[...Array(20)].map((_, i) => (
-      <span
-        key={i}
-        style={{
-          left: Math.random() * 100 + "%",
-          animationDuration: 2 + Math.random() * 2 + "s",
-        }}
-      />
-    ))}
-  </div>
+                  <div className="confetti">
+                    {[...Array(20)].map((_, i) => (
+                      <span
+                        key={i}
+                        style={{
+                          left: Math.random() * 100 + "%",
+                          animationDuration:
+                            2 + Math.random() * 2 + "s",
+                        }}
+                      />
+                    ))}
+                  </div>
 
-  <h2>🎉 Поздравляем!</h2>
-  <p>Вы прошли уровень</p>
+                  <h2>🎉 Поздравляем!</h2>
 
-  <div className="points">
-    ⭐ +{levelPoints[level]} баллов
-  </div>
+                  <p>Вы прошли уровень</p>
 
-  <button onClick={goToMenu}>В меню</button>
-  <button onClick={restartLevel}>Ещё раз</button>
-</>
+                  <div className="points">
+                    ⭐ +{levelPoints[level]} баллов
+                  </div>
+
+                  <button onClick={goToMenu}>
+                    В меню
+                  </button>
+
+                  <button onClick={restartLevel}>
+                    Ещё раз
+                  </button>
                 </>
               )}
 
             </div>
           )}
 
-        </div>
+                </div>
       )}
-       </div>
-       </div>
+    </div>
+  )}
+  </div>
+</div>
 );
 }
